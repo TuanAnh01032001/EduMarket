@@ -1,93 +1,92 @@
-import React, { useState } from "react";
-import { Sparkles, Loader2 } from "lucide-react"; // Icon
-import { Button } from "@/components/ui/CourseModal/button"; // Button tùy chỉnh
-import { mockCourses } from "@/data/mockData"; // Dữ liệu gợi ý giả lập
-import { CourseCard } from "./CourseCard"; // Thẻ hiển thị khóa học
-import { useFavorites } from "@/hooks/useFavorites"; // Hook quản lý danh sách yêu thích
-import { useToast } from "@/hooks/use-toast"; // Hook hiển thị toast
+import React, { useState } from 'react';
+import { Sparkles, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/CourseModal/button';
+import { mockCourses } from '@/data/mockData';
+import { CourseCard } from './CourseCard';
+import { useFavorites } from '@/hooks/useFavorites';
+import { useViewHistory } from '@/hooks/useViewHistory';
+import { useToast } from '@/hooks/use-toast';
 
-// Component gợi ý khóa học bằng AI
+ /**
+   * ưu tiên gợi ý các khóa học cùng tags/category với đã thích/xem
+   * Tuy nhiên sẽ tránh gợi ý các khóa học đã thích hoặc đã xem trước đó.
+   * Ví dụ: nếu người dùng đã thích khóa học về "Tiếng Anh Giao Tiếp Cơ Bản" và đã xem khóa học về "Tiếng Anh Giao Tiếp Cơ Bản",
+   * thì gợi ý sẽ ưu tiên các khóa học khác về "Luyện Nghe Nói Tiếng Anh Qua Phim"
+   */
 export const AISuggestions = ({ onViewDetails }) => {
-  const [suggestions, setSuggestions] = useState([]); // Danh sách gợi ý
-  const [isLoading, setIsLoading] = useState(false); // Trạng thái loading
-  const [hasError, setHasError] = useState(false); // Trạng thái lỗi
-  const [viewedCourses, setViewedCourses] = useState([]);
-  // Hook quản lý "yêu thích"
-  const { isFavorite, addToFavorites, removeFromFavorites } = useFavorites();
-
-  // Hook toast để hiển thị thông báo
+  const [suggestions, setSuggestions] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const { isFavorite, addToFavorites, removeFromFavorites, favorites } = useFavorites();
+  const { viewHistory } = useViewHistory();
   const { toast } = useToast();
 
-  const handleViewDetails = (course) => {
-    // Nếu chưa từng xem khóa học này thì thêm vào danh sách
-    setViewedCourses((prev) =>
-      prev.includes(course.id) ? prev : [...prev, course.id]
-    );
-
-    // Gọi lại hàm xem chi tiết gốc
-    onViewDetails(course);
-  };
-
-  // Hàm giả lập gọi API gợi ý khóa học
   const fetchSuggestions = async () => {
     setIsLoading(true);
     setHasError(false);
-
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      // Lấy danh sách id đã thích/xem
+      const favoriteIds = favorites.map(c => c.id);
+      const viewedIds = viewHistory.map(c => c.id);
+      // Lấy tags và category từ các khóa học đã thích/xem
+      const likedTags = new Set(favorites.flatMap(c => c.tags));
+      const viewedTags = new Set(viewHistory.flatMap(c => c.tags));
+      const likedCategories = new Set(favorites.map(c => c.category));
+      const viewedCategories = new Set(viewHistory.map(c => c.category));
 
-      // Lấy tags của các khóa học đã xem
-      const viewedTags = new Set(
-        mockCourses
-          .filter((c) => viewedCourses.includes(c.id))
-          .flatMap((c) => c.tags)
+      // Lọc ra các khóa học chưa thích/chưa xem
+      const notInteracted = mockCourses.filter(c => !favoriteIds.includes(c.id) && !viewedIds.includes(c.id));
+
+      // Ưu tiên gợi ý các khóa học cùng tags/category với đã thích/xem
+      let smartSuggestions = notInteracted.filter(c =>
+        c.tags.some(tag => likedTags.has(tag) || viewedTags.has(tag)) ||
+        likedCategories.has(c.category) || viewedCategories.has(c.category)
       );
 
-      // Lọc các khóa học có ít nhất 1 tag trùng
-      const relatedCourses = mockCourses.filter(
-        (c) =>
-          c.tags.some((tag) => viewedTags.has(tag)) &&
-          !viewedCourses.includes(c.id)
-      );
+      // Nếu chưa đủ 3 gợi ý, bổ sung random từ các khóa học còn lại
+      if (smartSuggestions.length < 3) {
+        const remaining = notInteracted.filter(c => !smartSuggestions.includes(c));
+        while (smartSuggestions.length < 3 && remaining.length > 0) {
+          const idx = Math.floor(Math.random() * remaining.length);
+          smartSuggestions.push(remaining[idx]);
+          remaining.splice(idx, 1);
+        }
+      }
 
-      // Fallback nếu chưa xem khóa nào
-      const fallbackCourses = mockCourses.slice(0, 3);
+      // Nếu vẫn chưa đủ, lấy từ toàn bộ mockCourses (trừ đã thích/xem)
+      if (smartSuggestions.length === 0) {
+        smartSuggestions = notInteracted.slice(0, 3);
+      }
 
-      setSuggestions(
-        relatedCourses.length > 0 ? relatedCourses : fallbackCourses
-      );
-
+      setSuggestions(smartSuggestions);
       toast({
-        title: "Gợi ý khóa học",
-        description:
-          relatedCourses.length > 0
-            ? "Dựa theo các khóa học bạn đã xem."
-            : "Bạn chưa xem khóa nào, nên đây là gợi ý phổ biến.",
+        title: 'Gợi ý thành công!',
+        description: 'Chúng tôi đã tìm được những khóa học phù hợp với bạn.',
       });
-    } catch (err) {
+    } catch (error) {
       setHasError(true);
       toast({
-        title: "Lỗi",
-        description: "Không thể lấy gợi ý lúc này.",
-        variant: "destructive",
+        title: 'Lỗi',
+        description: 'Không thể lấy gợi ý lúc này. Vui lòng thử lại sau.',
+        variant: 'destructive',
       });
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Thêm hoặc xóa khóa học khỏi yêu thích
   const handleToggleFavorite = (course) => {
     if (isFavorite(course.id)) {
       removeFromFavorites(course.id);
       toast({
-        title: "Đã xóa khỏi yêu thích",
+        title: 'Đã xóa khỏi yêu thích',
         description: `${course.name} đã được xóa khỏi danh sách yêu thích.`,
       });
     } else {
       addToFavorites(course);
       toast({
-        title: "Đã thêm vào yêu thích",
+        title: 'Đã thêm vào yêu thích',
         description: `${course.name} đã được thêm vào danh sách yêu thích.`,
       });
     }
@@ -95,14 +94,12 @@ export const AISuggestions = ({ onViewDetails }) => {
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-md mb-6">
-      {/* Tiêu đề + nút gợi ý */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
           <Sparkles className="w-6 h-6 text-blue-600" />
           Gợi ý AI cho bạn
         </h2>
 
-        {/* Nút gọi API gợi ý */}
         <Button
           onClick={fetchSuggestions}
           disabled={isLoading}
@@ -122,24 +119,17 @@ export const AISuggestions = ({ onViewDetails }) => {
         </Button>
       </div>
 
-      {/* Thông báo lỗi nếu có */}
       {hasError && (
         <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg mb-4">
           <p className="font-medium">Không thể lấy gợi ý lúc này</p>
-          <p className="text-sm">
-            Vui lòng kiểm tra kết nối mạng và thử lại sau.
-          </p>
+          <p className="text-sm">Vui lòng kiểm tra kết nối mạng và thử lại sau.</p>
         </div>
       )}
 
-      {/* Hiển thị loading skeleton khi đang tải */}
       {isLoading && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[...Array(3)].map((_, index) => (
-            <div
-              key={index}
-              className="bg-gray-100 rounded-lg p-4 animate-pulse"
-            >
+            <div key={index} className="bg-gray-100 rounded-lg p-4 animate-pulse">
               <div className="w-full h-32 bg-gray-300 rounded mb-4"></div>
               <div className="h-4 bg-gray-300 rounded mb-2"></div>
               <div className="h-3 bg-gray-300 rounded mb-2 w-3/4"></div>
@@ -149,28 +139,25 @@ export const AISuggestions = ({ onViewDetails }) => {
         </div>
       )}
 
-      {/* Hiển thị danh sách gợi ý nếu có */}
       {suggestions.length > 0 && !isLoading && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {suggestions.map((course) => (
             <CourseCard
               key={course.id}
               course={course}
-              isFavorite={isFavorite(course.id)} // Trạng thái yêu thích
-              onToggleFavorite={() => handleToggleFavorite(course)} // Xử lý khi click tim
-              onViewDetails={() => handleViewDetails(course)} // Xem chi tiết
+              isFavorite={isFavorite(course.id)}
+              onToggleFavorite={() => handleToggleFavorite(course)}
+              onViewDetails={() => onViewDetails(course)}
             />
           ))}
         </div>
       )}
 
-      {/* Giao diện mặc định khi chưa có gợi ý */}
       {suggestions.length === 0 && !isLoading && !hasError && (
         <div className="text-center py-8 text-gray-500">
           <Sparkles className="w-12 h-12 mx-auto mb-4 text-gray-300" />
           <p>
-            Nhấn nút "Gợi ý sản phẩm phù hợp" để khám phá những khóa học dành
-            riêng cho bạn!
+            Nhấn nút "Gợi ý sản phẩm phù hợp" để khám phá những khóa học dành riêng cho bạn!
           </p>
         </div>
       )}

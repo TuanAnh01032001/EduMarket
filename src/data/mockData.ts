@@ -109,6 +109,7 @@ export const mockCourses: Course[] = [
 ];
 
 
+
 export const priceRanges = [
   { label: "Tất cả", min: 0, max: Infinity },
   { label: "Dưới 500K", min: 0, max: 500000 },
